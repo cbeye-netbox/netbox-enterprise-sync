@@ -3,28 +3,39 @@
 Routes that mutate state (`/pause`, `/resume`, `/sync-now`, `/reverse`) require
 the X-Api-Token header to match the configured token file. Read-only routes
 are unauthenticated to make health monitoring trivial.
+
+The embedded dashboard is served at `/` (single HTML file from `static/`).
 """
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 
 from .adapters import make_endpoint
-from .config import Config
 from .state import State
 
 logger = logging.getLogger(__name__)
 
 
+STATIC_DIR = Path(__file__).parent / "static"
+
+
 def create_app(state: State, scheduler) -> FastAPI:
-    app = FastAPI(title="netbox-active-passive-sync", version="0.1.0")
+    app = FastAPI(title="netbox-active-passive-sync", version="0.1.0", docs_url="/api-docs")
 
     def require_token(x_api_token: Annotated[Optional[str], Header()] = None) -> None:
         expected = scheduler.cfg.control_api.token
         if expected and x_api_token != expected:
             raise HTTPException(status_code=401, detail="invalid api token")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def index() -> HTMLResponse:
+        return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
     @app.get("/health")
     async def health() -> dict:
@@ -57,6 +68,27 @@ def create_app(state: State, scheduler) -> FastAPI:
             except Exception as e:
                 out[label] = f"<error: {e}>"
         return out
+
+    @app.get("/cycles")
+    async def get_cycles(limit: int = 20) -> list[dict]:
+        """Return the most recent N cycle log entries, newest first."""
+        cycle_log = Path(scheduler.cfg.sync.cycle_log)
+        if not cycle_log.exists():
+            return []
+        limit = max(1, min(limit, 500))
+        # Tail efficiently: read whole file (cycle log stays small in practice)
+        lines = cycle_log.read_text(encoding="utf-8", errors="replace").splitlines()
+        entries: list[dict] = []
+        for line in lines[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        entries.reverse()
+        return entries
 
     @app.post("/pause", dependencies=[Depends(require_token)])
     async def pause() -> dict:

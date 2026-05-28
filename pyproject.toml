@@ -17,3 +17,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["sync_service*"]
+
+[tool.setuptools.package-data]
+sync_service = ["static/*"]

@@ -18,6 +18,35 @@ so the passive can be promoted with minimal data loss when the active fails.
                         (Docker container — orchestrator)
 ```
 
+An **embedded web dashboard** at `http://<orchestrator>:9911/` gives operators
+one-glance status (direction, NetBox versions, last sync, in-flight indicator)
+plus buttons for Pause / Resume / Sync now / Reverse direction. Paste your
+API token once and it sticks across page reloads via `localStorage`.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  ● NetBox Sync                                  [X-Api-Token  ] │
+├──────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ Source (active)  →  Target (passive)    [Enabled] [Idle ]  ││
+│  │  cluster-east        cluster-west                            ││
+│  │  v4.1.7              v4.1.7                                  ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────┐ ┌─────────────────────────────┐│
+│  │ Sync state                  │ │ Actions                     ││
+│  │  Last success   3 min ago   │ │  [ Pause   ] [ Sync now  ] ││
+│  │  Last failure   none        │ │  [ Resume  ] [ Reverse   ] ││
+│  │  Cycle interval 10 min      │ │                             ││
+│  └─────────────────────────────┘ └─────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ Recent cycles                                               ││
+│  │  ✓ success  2 min ago  18.4s  cluster-east → cluster-west  ││
+│  │  ✓ success 12 min ago  17.9s  cluster-east → cluster-west  ││
+│  │  ✕ failure  …                                               ││
+│  └─────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────┘
+```
+
 ## Table of contents
 
 - [What it syncs (and what it doesn't)](#what-it-syncs-and-what-it-doesnt)
@@ -31,6 +60,7 @@ so the passive can be promoted with minimal data loss when the active fails.
   - [5. Write config.yaml](#5-write-configyaml)
   - [6. Build and start](#6-build-and-start)
   - [7. Verify](#7-verify)
+- [Web dashboard](#web-dashboard)
 - [Configuration reference](#configuration-reference)
 - [Control API](#control-api)
 - [Failover runbook](#failover-runbook)
@@ -262,6 +292,52 @@ docker compose exec netbox-sync tail -F /var/lib/netbox-sync/cycles.log
 
 Open the passive NetBox UI (in maintenance/read-only mode) and confirm device
 counts, recent changes, and image attachments match the active.
+
+Then open the orchestrator dashboard at `http://<orchestrator-host>:9911/` —
+you should see the source/target boxes, the latest cycle in the history
+table, and `Enabled` + `Idle` badges.
+
+---
+
+## Web dashboard
+
+`http://<orchestrator>:9911/` serves a single-page operator dashboard. It's
+embedded in the same FastAPI process as the JSON API — no separate service
+to deploy.
+
+**What you can see (no auth needed):**
+
+- Current sync direction (`source.name → target.name`)
+- NetBox version detected on each side (pulled from the most recent cycle's log)
+- `Enabled` / `Paused` and `Idle` / `Syncing…` badges
+- Last successful and last failed cycle timestamps (relative + absolute)
+- Configured cycle interval
+- The most recent 20 cycles with status, duration, direction, and error detail
+- Connection status — a red banner appears if the orchestrator becomes unreachable
+
+**Actions (require the API token):**
+
+| Button | Endpoint | What it does |
+|---|---|---|
+| Pause | `POST /pause` | Stop running cycles. Active button while sync is enabled. |
+| Resume | `POST /resume` | Re-enable cycles. Active button while sync is paused. |
+| Sync now | `POST /sync-now` | Trigger an immediate cycle (only when enabled + not in-flight). |
+| Reverse direction | `POST /reverse` | Swap source/target in `config.yaml` and pause. Confirmation dialog prompts before firing. |
+
+Paste your token (contents of `secrets/api_token`) into the lock field in the
+header. The `Locked` badge turns into `Unlocked` and the action buttons
+become clickable. The token is stored in browser `localStorage`; clear the
+field to forget it.
+
+**Refresh cadence**: `/health` polled every 5s, `/cycles` every 15s. No
+WebSocket — the polling cost is negligible (a couple of small JSON responses
+per refresh).
+
+**Security note**: the dashboard inherits the orchestrator's network exposure.
+Bind to a private interface only (the example config binds `0.0.0.0:9911`
+but the docker-compose example publishes only on `127.0.0.1`). If you need
+remote access, put it behind a VPN, a private LB, or an authenticated reverse
+proxy — the token is the only auth gate, and there's no TLS termination here.
 
 ---
 

@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetBox Sync</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --surface: #ffffff;
+      --border: #e4e4e7;
+      --border-strong: #d4d4d8;
+      --text: #18181b;
+      --text-muted: #71717a;
+      --text-subtle: #a1a1aa;
+      --primary: #18181b;
+      --primary-hover: #27272a;
+      --success: #059669;
+      --success-bg: #ecfdf5;
+      --failure: #dc2626;
+      --failure-bg: #fef2f2;
+      --warning: #d97706;
+      --warning-bg: #fffbeb;
+      --info: #2563eb;
+      --info-bg: #eff6ff;
+      --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    header h1 .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-subtle);
+      transition: background 0.2s;
+    }
+    header h1 .dot.ok { background: var(--success); }
+    header h1 .dot.fail { background: var(--failure); }
+    header h1 .dot.busy { background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .token-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .token-bar input {
+      width: 280px;
+      padding: 6px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      background: var(--surface);
+      color: var(--text);
+    }
+    .token-bar input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(24,24,27,0.08);
+    }
+    .token-bar .lock-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: var(--border);
+    }
+    .token-bar .lock-badge.unlocked {
+      color: var(--success);
+      background: var(--success-bg);
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 32px 48px;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1fr;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .card-body { padding: 20px; }
+
+    /* Status card */
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .direction {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 16px;
+      font-weight: 500;
+    }
+    .cluster {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .cluster .name {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .cluster .role {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .cluster .version {
+      font-size: 12px;
+      color: var(--text-subtle);
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .arrow {
+      color: var(--text-subtle);
+      font-size: 20px;
+      user-select: none;
+    }
+    .badges {
+      display: flex;
+      gap: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--border);
+      color: var(--text-muted);
+    }
+    .badge.enabled { background: var(--success-bg); color: var(--success); }
+    .badge.disabled { background: var(--warning-bg); color: var(--warning); }
+    .badge.busy { background: var(--info-bg); color: var(--info); }
+    .badge .ind {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .badge.busy .ind { animation: pulse 1.2s ease-in-out infinite; }
+
+    /* Two-column row for metrics + actions */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 720px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .token-bar input { width: 180px; }
+      header { padding: 14px 20px; }
+      main { padding: 20px 16px; }
+    }
+
+    /* Metrics */
+    .metric-list {
+      display: grid;
+      gap: 16px;
+    }
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .metric label {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .metric .value {
+      font-size: 14px;
+      font-weight: 500;
+      text-align: right;
+    }
+    .metric .value.muted { color: var(--text-subtle); font-weight: 400; }
+    .metric .value .abs {
+      display: block;
+      font-size: 11px;
+      color: var(--text-subtle);
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      margin-top: 2px;
+    }
+
+    /* Actions */
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+      font-family: inherit;
+    }
+    .btn:hover:not(:disabled) {
+      background: #f4f4f5;
+      border-color: var(--text-subtle);
+    }
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    .btn.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    .btn.primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+    .btn.danger {
+      color: var(--failure);
+      border-color: var(--border-strong);
+    }
+    .btn.danger:hover:not(:disabled) {
+      background: var(--failure-bg);
+      border-color: var(--failure);
+    }
+
+    /* Cycle table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 500;
+      background: #fafafa;
+      border-bottom: 1px solid var(--border-strong);
+    }
+    tr:last-child td { border-bottom: none; }
+    .status-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+    }
+    .status-cell.success { color: var(--success); }
+    .status-cell.failure { color: var(--failure); }
+    .status-cell.in_progress { color: var(--info); }
+    .status-cell .icon {
+      width: 14px;
+      height: 14px;
+    }
+    .error-detail {
+      color: var(--failure);
+      font-size: 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+    .empty {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--text-subtle);
+      font-size: 13px;
+    }
+
+    /* Banner */
+    .banner {
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .banner.error { background: var(--failure-bg); color: var(--failure); border: 1px solid #fecaca; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(24,24,27,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 480px;
+      width: calc(100% - 32px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.18);
+    }
+    .modal h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .modal p {
+      margin: 0 0 16px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    /* Toast */
+    #toasts {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 200;
+      pointer-events: none;
+    }
+    .toast {
+      padding: 10px 14px;
+      border-radius: 6px;
+      background: var(--text);
+      color: white;
+      font-size: 13px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+      max-width: 360px;
+      pointer-events: auto;
+      animation: slide-in 0.2s ease-out;
+    }
+    .toast.error { background: var(--failure); }
+    .toast.success { background: var(--success); }
+    @keyframes slide-in {
+      from { transform: translateX(20px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    footer {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 32px 32px;
+      font-size: 11px;
+      color: var(--text-subtle);
+      display: flex;
+      justify-content: space-between;
+    }
+    footer a { color: var(--text-muted); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>
+      <span class="dot" id="status-dot"></span>
+      NetBox Sync
+    </h1>
+    <div class="token-bar">
+      <input type="password" id="token-input" placeholder="X-Api-Token" autocomplete="off">
+      <span class="lock-badge" id="lock-badge">Locked</span>
+    </div>
+  </header>
+
+  <main>
+    <div id="banner-slot"></div>
+
+    <!-- Status -->
+    <section class="card">
+      <div class="card-header">Status</div>
+      <div class="card-body">
+        <div class="status-row">
+          <div class="direction">
+            <div class="cluster">
+              <span class="role">Source (active)</span>
+              <span class="name" id="source-name">—</span>
+              <span class="version" id="source-version">—</span>
+            </div>
+            <span class="arrow">→</span>
+            <div class="cluster">
+              <span class="role">Target (passive)</span>
+              <span class="name" id="target-name">—</span>
+              <span class="version" id="target-version">—</span>
+            </div>
+          </div>
+          <div class="badges">
+            <span class="badge" id="enabled-badge"><span class="ind"></span><span class="text">—</span></span>
+            <span class="badge" id="busy-badge"><span class="ind"></span><span class="text">—</span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <!-- Metrics -->
+      <section class="card">
+        <div class="card-header">Sync state</div>
+        <div class="card-body">
+          <div class="metric-list">
+            <div class="metric">
+              <label>Last success</label>
+              <span class="value" id="last-success">—</span>
+            </div>
+            <div class="metric">
+              <label>Last failure</label>
+              <span class="value muted" id="last-failure">—</span>
+            </div>
+            <div class="metric">
+              <label>Cycle interval</label>
+              <span class="value" id="interval">—</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Actions -->
+      <section class="card">
+        <div class="card-header">Actions</div>
+        <div class="card-body">
+          <div class="action-grid">
+            <button class="btn" id="btn-pause" disabled>Pause</button>
+            <button class="btn" id="btn-resume" disabled>Resume</button>
+            <button class="btn primary" id="btn-sync" disabled>Sync now</button>
+            <button class="btn danger" id="btn-reverse" disabled>Reverse direction</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Cycle history -->
+    <section class="card">
+      <div class="card-header">Recent cycles</div>
+      <div id="cycles-container">
+        <div class="empty">Loading…</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>netbox-enterprise-sync · embedded dashboard</span>
+    <span><a href="/api-docs" target="_blank">API docs</a> · <a href="/health" target="_blank">/health</a></span>
+  </footer>
+
+  <div id="modal-slot"></div>
+  <div id="toasts"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = "netbox-sync-token";
+
+  // ---------- Token management ----------
+  let token = localStorage.getItem(TOKEN_KEY) || "";
+  const tokenInput = $("token-input");
+  const lockBadge = $("lock-badge");
+  tokenInput.value = token;
+
+  function updateLock() {
+    if (token) {
+      lockBadge.textContent = "Unlocked";
+      lockBadge.classList.add("unlocked");
+    } else {
+      lockBadge.textContent = "Locked";
+      lockBadge.classList.remove("unlocked");
+    }
+    syncButtonStates();
+  }
+  tokenInput.addEventListener("input", () => {
+    token = tokenInput.value.trim();
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+    updateLock();
+  });
+
+  // ---------- Toast ----------
+  function toast(msg, kind = "") {
+    const t = document.createElement("div");
+    t.className = "toast " + kind;
+    t.textContent = msg;
+    $("toasts").appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+
+  // ---------- API ----------
+  async function api(path, opts = {}) {
+    const init = { ...opts, headers: { ...(opts.headers || {}) } };
+    if (opts.method && opts.method !== "GET") {
+      init.headers["X-Api-Token"] = token;
+    }
+    let r;
+    try {
+      r = await fetch(path, init);
+    } catch (e) {
+      throw new Error("network: " + e.message);
+    }
+    if (!r.ok) {
+      let detail = r.statusText;
+      try {
+        const j = await r.json();
+        detail = j.detail || JSON.stringify(j);
+      } catch {}
+      throw new Error(`HTTP ${r.status}: ${detail}`);
+    }
+    return r.json();
+  }
+
+  // ---------- Rendering helpers ----------
+  function relTime(ts) {
+    if (ts == null) return "never";
+    const now = Date.now() / 1000;
+    const diff = now - ts;
+    if (diff < 0) return "just now";
+    if (diff < 60) return `${Math.floor(diff)}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+    return `${Math.floor(diff / 86400)} days ago`;
+  }
+  function absTime(ts) {
+    if (ts == null) return "";
+    return new Date(ts * 1000).toLocaleString();
+  }
+  function fmtInterval(s) {
+    if (!s) return "—";
+    if (s % 60 === 0) return `${s / 60} min`;
+    return `${s}s`;
+  }
+  function fmtDuration(s) {
+    if (s == null) return "—";
+    if (s < 60) return `${s.toFixed(1)}s`;
+    return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
+  }
+
+  // ---------- Button state ----------
+  let lastHealth = null;
+  function syncButtonStates() {
+    const haveToken = !!token;
+    const enabled = lastHealth?.enabled === true;
+    const busy = lastHealth?.in_flight === true;
+    $("btn-pause").disabled = !haveToken || !enabled;
+    $("btn-resume").disabled = !haveToken || enabled;
+    $("btn-sync").disabled = !haveToken || !enabled || busy;
+    $("btn-reverse").disabled = !haveToken || busy;
+  }
+
+  // ---------- Status banner on connection failure ----------
+  function setBanner(msg) {
+    const slot = $("banner-slot");
+    slot.innerHTML = msg ? `<div class="banner error">${msg}</div>` : "";
+  }
+
+  // ---------- Refresh: health + cycles ----------
+  async function refreshHealth() {
+    try {
+      const h = await api("/health");
+      lastHealth = h;
+      setBanner("");
+      $("source-name").textContent = h.source || "—";
+      $("target-name").textContent = h.target || "—";
+
+      const enabledBadge = $("enabled-badge");
+      const enabledText = enabledBadge.querySelector(".text");
+      if (h.enabled) {
+        enabledBadge.className = "badge enabled";
+        enabledText.textContent = "Enabled";
+      } else {
+        enabledBadge.className = "badge disabled";
+        enabledText.textContent = "Paused";
+      }
+
+      const busyBadge = $("busy-badge");
+      const busyText = busyBadge.querySelector(".text");
+      if (h.in_flight) {
+        busyBadge.className = "badge busy";
+        busyText.textContent = "Syncing…";
+      } else {
+        busyBadge.className = "badge";
+        busyText.textContent = "Idle";
+      }
+
+      const dot = $("status-dot");
+      dot.className = "dot " + (h.in_flight ? "busy" : (h.last_failure_at && (h.last_success_at || 0) < (h.last_failure_at || 0) ? "fail" : "ok"));
+
+      const ls = $("last-success");
+      ls.innerHTML = `${relTime(h.last_success_at)}` + (h.last_success_at ? `<span class="abs">${absTime(h.last_success_at)}</span>` : "");
+      const lf = $("last-failure");
+      lf.innerHTML = h.last_failure_at ? `${relTime(h.last_failure_at)}<span class="abs">${absTime(h.last_failure_at)}</span>` : "<span class='muted'>none</span>";
+      lf.className = h.last_failure_at ? "value" : "value muted";
+      $("interval").textContent = fmtInterval(h.interval_seconds);
+      syncButtonStates();
+    } catch (e) {
+      setBanner(`Orchestrator unreachable — ${e.message}`);
+      $("status-dot").className = "dot fail";
+    }
+  }
+
+  async function refreshCycles() {
+    try {
+      const cycles = await api("/cycles?limit=20");
+      const container = $("cycles-container");
+      if (!cycles.length) {
+        container.innerHTML = `<div class="empty">No cycles run yet.</div>`;
+        return;
+      }
+      // Update version display from latest entry
+      const latest = cycles.find(c => c.source_version || c.target_version);
+      if (latest) {
+        if (latest.source_version) $("source-version").textContent = latest.source_version;
+        if (latest.target_version) $("target-version").textContent = latest.target_version;
+      }
+
+      const rows = cycles.map(c => {
+        const status = (c.status || "unknown");
+        const icon = status === "success" ? "✓" : status === "failure" ? "✕" : "⟳";
+        const dur = fmtDuration(c.duration_seconds);
+        const when = c.finished_at ? relTime(c.finished_at) : relTime(c.started_at);
+        const abs = c.finished_at ? absTime(c.finished_at) : absTime(c.started_at);
+        const dir = `${c.source} → ${c.target}`;
+        const errCell = (status === "failure" && c.error)
+          ? `<div class="error-detail" title="${escapeHtml(c.error)}">${escapeHtml(c.error)}</div>`
+          : "";
+        return `
+          <tr>
+            <td><span class="status-cell ${status}">${icon} ${status}</span></td>
+            <td>${when}<div class="abs" style="font-size:11px;color:var(--text-subtle);font-family:ui-monospace,monospace;margin-top:2px">${abs}</div></td>
+            <td class="mono">${dur}</td>
+            <td>${escapeHtml(dir)}</td>
+            <td>${errCell}</td>
+          </tr>
+        `;
+      }).join("");
+
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Status</th><th>When</th><th>Duration</th><th>Direction</th><th>Detail</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (e) {
+      // Don't toast — banner already shows orchestrator issues
+    }
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return "";
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  // ---------- Modal ----------
+  function confirmDialog(title, body, danger = false) {
+    return new Promise((resolve) => {
+      const slot = $("modal-slot");
+      slot.innerHTML = `
+        <div class="modal-backdrop">
+          <div class="modal">
+            <h2>${escapeHtml(title)}</h2>
+            <p>${body}</p>
+            <div class="modal-actions">
+              <button class="btn" data-act="cancel">Cancel</button>
+              <button class="btn ${danger ? 'danger' : 'primary'}" data-act="ok">Confirm</button>
+            </div>
+          </div>
+        </div>
+      `;
+      slot.querySelectorAll("button").forEach(b => {
+        b.addEventListener("click", () => {
+          slot.innerHTML = "";
+          resolve(b.dataset.act === "ok");
+        });
+      });
+    });
+  }
+
+  // ---------- Actions ----------
+  async function doAction(label, path, confirmMsg) {
+    if (confirmMsg) {
+      const ok = await confirmDialog(label, confirmMsg, label.toLowerCase().includes("revers"));
+      if (!ok) return;
+    }
+    try {
+      await api(path, { method: "POST" });
+      toast(`${label} ✓`, "success");
+      await refreshHealth();
+      await refreshCycles();
+    } catch (e) {
+      toast(`${label} failed — ${e.message}`, "error");
+    }
+  }
+
+  $("btn-pause").addEventListener("click", () => doAction("Pause", "/pause"));
+  $("btn-resume").addEventListener("click", () => doAction("Resume", "/resume"));
+  $("btn-sync").addEventListener("click", () => doAction("Sync now", "/sync-now"));
+  $("btn-reverse").addEventListener("click", () => {
+    const src = lastHealth?.source || "source";
+    const tgt = lastHealth?.target || "target";
+    doAction(
+      "Reverse direction",
+      "/reverse",
+      `Swap <b>${escapeHtml(src)}</b> and <b>${escapeHtml(tgt)}</b>. Sync will be paused — flip your LB/DNS, then click <b>Resume</b>.`
+    );
+  });
+
+  // ---------- Boot ----------
+  updateLock();
+  refreshHealth();
+  refreshCycles();
+  setInterval(refreshHealth, 5000);
+  setInterval(refreshCycles, 15000);
+})();
+</script>
+</body>
+</html>
