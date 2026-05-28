@@ -1,0 +1,95 @@
+# Reference deployment — topology A (orchestrator co-located with the PASSIVE
+# NetBox stack). This is the recommended default: the passive host is where
+# the restored data has to land, so keeping the heavy I/O local is the most
+# efficient placement.
+#
+# To deploy on a third (out-of-band) machine instead, see comments inline.
+# To deploy co-located with the active, see the "Topology B notes" at bottom.
+
+services:
+
+  netbox-sync:
+    build:
+      context: .
+    image: netbox-active-passive-sync:latest
+    container_name: netbox-sync
+    restart: unless-stopped
+
+    # ---- Topology A (co-located with passive) ----
+    # The orchestrator joins the passive NetBox docker network so it can reach
+    # passive Postgres/Redis by their service hostnames. Source is reached via
+    # ssh to the active host.
+    networks:
+      - netbox-passive
+
+    ports:
+      # Control API. Expose only on a private interface in production.
+      - "127.0.0.1:9911:9911"
+
+    volumes:
+      # Live config — `POST /reverse` rewrites this file in place
+      - ./config.yaml:/etc/netbox-sync/config.yaml
+      # Persistent orchestrator state (enabled flag, cycle log, staging dump)
+      - netbox-sync-state:/var/lib/netbox-sync
+      # Passive NetBox's media dir — sync writes here.
+      # Mount the SAME named volume the passive NetBox stack mounts at
+      # /opt/netbox/netbox/media. For docker-compose users that's typically
+      # `netbox-media-files`.
+      - netbox-media-files:/mnt/passive-media
+      # Read passive NetBox version (release.yaml). For netbox-docker this
+      # lives inside the netbox container — easiest is to bake it into a
+      # shared volume, or change `target.version_file` to read from a
+      # well-known path you publish.
+      - netbox-passive-release:/mnt/passive-netbox:ro
+
+    # All sensitive material via Docker secrets — never bake into the image.
+    secrets:
+      - source_ssh_key
+      - source_pg_password
+      - target_pg_password
+      - api_token
+
+    # If you want quiesce_cmd / resume_cmd to manage the passive NetBox via
+    # docker compose, mount the docker socket and the compose file:
+    #
+    #   - /var/run/docker.sock:/var/run/docker.sock
+    #   - /opt/netbox:/opt/netbox:ro
+    #
+    # The example config's quiesce_cmd uses `docker compose ... stop`. Drop
+    # the socket mount if you'd rather manage NetBox lifecycle externally.
+
+  # ----------------------------------------------------------------------
+  # Topology C (orchestrator on a third machine) — same service, different
+  # volumes:
+  #   * Drop the netbox-media-files and netbox-passive-release mounts
+  #   * Set both `source.transport` and `target.transport` to `ssh`
+  #   * Add a second SSH key secret for the target
+  #   * Optionally drop the `netbox-passive` network (no local pg)
+  #
+  # Topology B (co-located with active) — same service, different volumes:
+  #   * Mount active's netbox-media-files at /mnt/active-media (read-only)
+  #   * Set `source.transport=local`, `target.transport=ssh`
+  #   * SSH key in the secret block is now for reaching the *passive* host
+  # ----------------------------------------------------------------------
+
+networks:
+  netbox-passive:
+    external: true   # join the passive NetBox stack's existing network
+
+volumes:
+  netbox-sync-state:
+  # These two are defined by the passive NetBox stack — declared external here
+  netbox-media-files:
+    external: true
+  netbox-passive-release:
+    external: true
+
+secrets:
+  source_ssh_key:
+    file: ./secrets/source_ssh_key
+  source_pg_password:
+    file: ./secrets/source_pg_password
+  target_pg_password:
+    file: ./secrets/target_pg_password
+  api_token:
+    file: ./secrets/api_token

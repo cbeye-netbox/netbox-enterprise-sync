@@ -1,0 +1,23 @@
+# Secrets — these must NEVER hit the repo
+secrets/
+*.pem
+*.key
+config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local docker overrides
+docker-compose.override.yml
