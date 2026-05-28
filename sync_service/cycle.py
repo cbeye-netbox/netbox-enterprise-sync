@@ -38,12 +38,10 @@ async def _run_locked(cfg: Config, state: State, alerter: Alerter) -> dict:
         "target": cfg.target.name,
         "status": "in_progress",
     }
+    logger.info("cycle start source=%s target=%s", cfg.source.name, cfg.target.name)
     try:
         # 1. Schema-fingerprint gate.
-        # Compare the latest applied Django migration per app on both sides. If
-        # they don't match, the two NetBox installs are running different
-        # versions (or different plugin sets) and a restore would corrupt the
-        # passive — abort.
+        logger.info("step 1/4 schema fingerprint check")
         src_fp = await postgres.schema_fingerprint(cfg.source)
         tgt_fp = await postgres.schema_fingerprint(cfg.target)
         entry["source_fingerprint"] = src_fp
@@ -55,14 +53,17 @@ async def _run_locked(cfg: Config, state: State, alerter: Alerter) -> dict:
             )
 
         # 2. Dump on source → staging file on the orchestrator's disk.
+        logger.info("step 2/4 pg_dump on source")
         Path(cfg.sync.orchestrator_staging_dir).mkdir(parents=True, exist_ok=True)
         dump_path = os.path.join(cfg.sync.orchestrator_staging_dir, "db.dump")
         entry["dump_bytes"] = await postgres.dump(cfg.source, dump_path)
 
         # 3. Restore onto target (drop+recreate+pg_restore -j 4).
+        logger.info("step 3/4 pg_restore on target")
         await postgres.restore(cfg.target, dump_path)
 
         # 4. Smoke check the restored DB.
+        logger.info("step 4/4 smoke check")
         entry["smoke"] = await postgres.smoke_check(cfg.target)
 
         finished = time.time()

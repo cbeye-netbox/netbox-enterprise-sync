@@ -30,6 +30,12 @@ target:
     user: netbox
     db: netbox
     password_file: /run/secrets/target_pg_password
+    # Optional. If the `netbox` role does not have CREATEDB (typical with
+    # K8s-managed Postgres operators that only grant app-scoped roles),
+    # set an admin role here to run the DROP/CREATE DATABASE steps. The main
+    # `user` above remains the database owner after each restore.
+    # admin_user: postgres
+    # admin_password_file: /run/secrets/target_pg_admin_password
 
 control_api:
   bind: 0.0.0.0:9911

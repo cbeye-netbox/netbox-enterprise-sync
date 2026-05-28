@@ -20,11 +20,23 @@ class PostgresConfig:
     db: str
     port: int = 5432
     password_file: Optional[str] = None
+    # Optional separate admin role used only for DROP/CREATE DATABASE on the
+    # target side. Useful when the application role (netbox) does not have
+    # CREATEDB — common with K8s-managed Postgres operators that grant only
+    # the app-scoped role. If unset, the main user is used for everything.
+    admin_user: Optional[str] = None
+    admin_password_file: Optional[str] = None
 
     @property
     def password(self) -> Optional[str]:
         if self.password_file and Path(self.password_file).exists():
             return Path(self.password_file).read_text().strip()
+        return None
+
+    @property
+    def admin_password(self) -> Optional[str]:
+        if self.admin_password_file and Path(self.admin_password_file).exists():
+            return Path(self.admin_password_file).read_text().strip()
         return None
 
 

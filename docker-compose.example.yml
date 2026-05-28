@@ -23,10 +23,20 @@ services:
       # Persistent orchestrator state (enabled flag, cycle log, staging dump)
       - netbox-sync-state:/var/lib/netbox-sync
 
+    # First cycle is PAUSED by default — call POST /resume (or click Resume
+    # in the dashboard) to start syncing. Set INITIAL_ENABLED=true to start
+    # enabled instead, but be aware the first cycle drops+recreates the
+    # target database.
+    # environment:
+    #   INITIAL_ENABLED: "false"
+
     secrets:
       - source_pg_password
       - target_pg_password
       - api_token
+      # Add target_pg_admin_password if your target uses a separate
+      # admin role for DROP/CREATE DATABASE (see config.example.yaml).
+      # - target_pg_admin_password
 
 volumes:
   netbox-sync-state:

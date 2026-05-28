@@ -3,15 +3,25 @@
 State is filesystem-backed so it survives container restarts. The orchestrator
 assumes it is the only writer; running two orchestrators against the same state
 dir is unsupported.
+
+First-run behavior is **paused by default**. A pg_restore is destructive (it
+drops and recreates the target database), so we don't want a fresh
+`docker compose up -d` to wipe an existing database before the operator has a
+chance to confirm. Set `INITIAL_ENABLED=true` in the environment to opt out of
+this and start syncing immediately.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Optional
 
 from .config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class State:
@@ -25,9 +35,16 @@ class State:
         self.last_failure_file = base / "last_failure_at"
         self.in_flight = False
         self.cycle_lock = asyncio.Lock()
-        # Default to enabled if no flag file exists
+        # On first run (no flag file) default to PAUSED so a fresh deploy
+        # doesn't immediately destroy the target. Operators must POST /resume
+        # to start syncing. Override with INITIAL_ENABLED=true.
         if not self.enabled_file.exists():
-            self.set_enabled(True)
+            initial = os.environ.get("INITIAL_ENABLED", "false").lower() in ("true", "1", "yes")
+            self.set_enabled(initial)
+            logger.info(
+                "first run: sync %s (set INITIAL_ENABLED=true to start enabled, or POST /resume)",
+                "ENABLED" if initial else "PAUSED",
+            )
 
     @property
     def enabled(self) -> bool:

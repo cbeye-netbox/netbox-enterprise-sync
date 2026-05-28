@@ -29,7 +29,11 @@ COPY sync_service /app/sync_service
 
 RUN pip install --no-cache-dir .
 
-RUN useradd --system --uid 10001 --home /home/sync --create-home sync \
+# Debian's passwd package ships a vestigial `sync` user at UID 4 (a relic of
+# the `sync` coreutils shell). Remove it before creating our own UID-10001 user
+# under the same name.
+RUN userdel sync 2>/dev/null || true \
+    && useradd --system --uid 10001 --home /home/sync --create-home sync \
     && mkdir -p /var/lib/netbox-sync /etc/netbox-sync \
     && chown -R sync:sync /var/lib/netbox-sync /etc/netbox-sync /home/sync
 

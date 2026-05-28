@@ -82,10 +82,20 @@ On the **orchestrator host** (any Linux box with Docker):
 
 On both **Postgres servers**:
 
-- A user the orchestrator can connect as (`netbox` works fine) with permission
-  to `pg_dump` everything on the source and to drop/create/restore the
-  `netbox` database on the target. Typically: ownership of the `netbox` DB
-  plus `CREATEDB`.
+- **Source side**: a role the orchestrator can connect as with read access to
+  every table in the `netbox` database. The default `netbox` role is fine.
+- **Target side**: the orchestrator drops and recreates the `netbox` database
+  each cycle, which requires `CREATEDB` privilege. You have two options:
+  1. **Grant `CREATEDB` on the `netbox` role**: `ALTER ROLE netbox CREATEDB;` —
+     simplest, works out of the box for self-managed Postgres and
+     `netbox-docker`.
+  2. **Use a separate admin role**: Kubernetes-managed Postgres operators
+     (CloudNativePG, Zalando, Crunchy PGO) often grant only the app-scoped
+     role and *do not* expose `CREATEDB`. In that case, configure a separate
+     admin role on the target via `postgres.admin_user` + `admin_password_file`
+     in `config.yaml`. The orchestrator uses that role only for the
+     DROP/CREATE DATABASE steps; `pg_restore` still runs as the main `netbox`
+     role, which remains the database owner.
 
 Both NetBox installs must be on **the same NetBox version + same plugins**.
 The schema-fingerprint gate enforces this — a mismatch aborts the cycle.
@@ -154,9 +164,21 @@ docker compose -f docker-compose.example.yml up -d --build
 docker compose -f docker-compose.example.yml logs -f netbox-sync
 ```
 
-The first cycle runs at startup. On that first run the **passive Postgres
-will be wiped and replaced** with the active's contents — make sure that's
-what you want.
+**Sync is PAUSED on first start.** This is intentional — a `pg_restore` drops
+and recreates the target database, and we don't want a fresh deploy to wipe
+an existing database before you've had a chance to confirm. You'll see
+`first run: sync PAUSED` in the logs.
+
+To start syncing, either:
+
+- Click **Resume** in the dashboard at `http://<orchestrator-host>:9911/`
+  (paste the API token first), or
+- `curl -X POST -H "X-Api-Token: $(cat secrets/api_token)" http://localhost:9911/resume`, or
+- Set `INITIAL_ENABLED=true` in the container environment to skip the first-
+  run pause entirely (be sure you actually want to overwrite the target).
+
+On the first cycle the **passive Postgres will be dropped, recreated, and
+restored** from the active's contents.
 
 ### 6. Verify
 
@@ -164,7 +186,8 @@ what you want.
 curl -s http://localhost:9911/health | jq .
 ```
 
-Should print source/target names, `enabled: true`, last_success_at, etc.
+Should print source/target names, `enabled: false` (until you resume),
+`last_success_at: null`, etc.
 
 Open `http://<orchestrator-host>:9911/` in a browser for the dashboard.
 
@@ -226,6 +249,8 @@ The full schema lives in [`config.example.yaml`](./config.example.yaml).
 | `<endpoint>.postgres.user` | Role to connect as (usually `netbox`) |
 | `<endpoint>.postgres.db` | Database name (usually `netbox`) |
 | `<endpoint>.postgres.password_file` | Path to a file containing the password (Docker secret convention) |
+| `<endpoint>.postgres.admin_user` | Optional. Separate admin role used only for DROP/CREATE DATABASE. Set when the main role lacks `CREATEDB`. (Used on the target side; ignored on source.) |
+| `<endpoint>.postgres.admin_password_file` | Optional. Password file for `admin_user`. |
 | `control_api.bind` | `host:port` for the FastAPI control surface |
 | `control_api.token_file` | Path to file containing the API token |
 | `alerts.webhook_url` | POST `{title, detail}` here on cycle failure (Slack-compatible). Optional. |
@@ -311,10 +336,23 @@ When the active fails:
 
 ## Troubleshooting
 
+**`first run: sync PAUSED` and no cycles run**
+That's the safe default. Call `POST /resume` (or click Resume in the
+dashboard) to start syncing. Set `INITIAL_ENABLED=true` in the container env
+if you want to skip the first-run pause on future deploys.
+
 **`pg_dump on cluster-east (rc=2): ...connection refused`**
 The orchestrator host can't reach the active Postgres. Test with
 `psql -h <host> -U netbox -d netbox -c 'SELECT 1'` from the orchestrator host.
-Check firewalls, `pg_hba.conf`, network routes.
+Check firewalls, `pg_hba.conf`, network routes. Connection attempts time out
+in ~10s (via `PGCONNECT_TIMEOUT=10`) so a misconfigured endpoint surfaces
+the error in the next cycle's log, not minutes later.
+
+**`create database on cluster-west failed: ... permission denied to create database`**
+The target role doesn't have `CREATEDB`. Either grant it
+(`ALTER ROLE netbox CREATEDB;`) or configure a separate admin role via
+`postgres.admin_user` / `admin_password_file` in `config.yaml`. See
+[Prerequisites](#prerequisites).
 
 **`schema fingerprint mismatch — NetBox versions or plugin sets differ`**
 The two databases have different `django_migrations` state. Bring them in
