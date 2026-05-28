@@ -1,8 +1,8 @@
 # NetBox active/passive sync orchestrator
 #
-# The postgres-client version should match the NetBox cluster's Postgres major
-# version. NetBox 4.x ships on Postgres 16; bump the apt suite + pkg name if
-# you're on a different major.
+# Standalone Docker container. Reaches both Postgres servers over TCP. The
+# postgres-client major version should match the NetBox Postgres major version
+# (NetBox 4.x runs on Postgres 16 by default).
 
 FROM python:3.12-slim AS base
 
@@ -13,7 +13,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates gnupg curl \
-        rsync openssh-client redis-tools \
     && install -d /usr/share/postgresql-common/pgdg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
          -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \

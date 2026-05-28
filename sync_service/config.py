@@ -1,18 +1,16 @@
 """Typed configuration loaded from a single YAML file at /etc/netbox-sync/config.yaml.
 
-Only the orchestrator reads this. Endpoints (active/passive NetBox clusters)
-are unaware of the orchestrator's existence.
+The sync service is a standalone Docker container; it reaches both Postgres
+hosts over TCP. No SSH, no NetBox host access required.
 """
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import yaml
-
-Transport = Literal["local", "ssh"]
 
 
 @dataclass
@@ -31,44 +29,10 @@ class PostgresConfig:
 
 
 @dataclass
-class RedisConfig:
-    host: str
-    port: int = 6379
-
-
-@dataclass
-class PathsConfig:
-    media: str
-
-
-@dataclass
-class SSHConfig:
-    host: str
-    user: str
-    key_file: str
-    port: int = 22
-
-
-@dataclass
 class EndpointConfig:
     name: str
-    transport: Transport
     postgres: PostgresConfig
-    redis: RedisConfig
-    paths: PathsConfig
-    version_file: str
-    ssh: Optional[SSHConfig] = None
-    quiesce_cmd: Optional[str] = None
-    resume_cmd: Optional[str] = None
-    staging_dir: str = "/tmp/netbox-sync"
-
-    def __post_init__(self) -> None:
-        if self.transport == "ssh" and self.ssh is None:
-            raise ValueError(f"endpoint {self.name}: transport=ssh requires an ssh block")
-
-    @property
-    def is_local(self) -> bool:
-        return self.transport == "local"
+    staging_dir: str = "/var/lib/netbox-sync/staging"
 
 
 @dataclass
@@ -127,11 +91,7 @@ class Config:
         )
 
     def reverse_on_disk(self) -> None:
-        """Atomically swap source and target blocks in the YAML config file.
-
-        The reload of in-memory config happens after this returns; callers should
-        call Config.load(path) again to pick up the new direction.
-        """
+        """Atomically swap source and target blocks in the YAML config file."""
         with open(self.config_path) as f:
             raw = yaml.safe_load(f)
         raw["source"], raw["target"] = raw["target"], raw["source"]
@@ -144,13 +104,6 @@ class Config:
 def _endpoint_from_dict(d: dict[str, Any]) -> EndpointConfig:
     return EndpointConfig(
         name=d["name"],
-        transport=d["transport"],
         postgres=PostgresConfig(**d["postgres"]),
-        redis=RedisConfig(**d["redis"]),
-        paths=PathsConfig(**d["paths"]),
-        version_file=d["version_file"],
-        ssh=SSHConfig(**d["ssh"]) if d.get("ssh") else None,
-        quiesce_cmd=d.get("quiesce_cmd"),
-        resume_cmd=d.get("resume_cmd"),
-        staging_dir=d.get("staging_dir", "/tmp/netbox-sync"),
+        staging_dir=d.get("staging_dir", "/var/lib/netbox-sync/staging"),
     )

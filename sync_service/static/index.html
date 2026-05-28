@@ -463,13 +463,11 @@
             <div class="cluster">
               <span class="role">Source (active)</span>
               <span class="name" id="source-name">—</span>
-              <span class="version" id="source-version">—</span>
             </div>
             <span class="arrow">→</span>
             <div class="cluster">
               <span class="role">Target (passive)</span>
               <span class="name" id="target-name">—</span>
-              <span class="version" id="target-version">—</span>
             </div>
           </div>
           <div class="badges">
@@ -690,13 +688,6 @@
         container.innerHTML = `<div class="empty">No cycles run yet.</div>`;
         return;
       }
-      // Update version display from latest entry
-      const latest = cycles.find(c => c.source_version || c.target_version);
-      if (latest) {
-        if (latest.source_version) $("source-version").textContent = latest.source_version;
-        if (latest.target_version) $("target-version").textContent = latest.target_version;
-      }
-
       const rows = cycles.map(c => {
         const status = (c.status || "unknown");
         const icon = status === "success" ? "✓" : status === "failure" ? "✕" : "⟳";

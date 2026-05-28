@@ -1,10 +1,7 @@
-"""Control API — FastAPI surface used by humans and the future NetBox plugin.
+"""Control API + embedded dashboard.
 
-Routes that mutate state (`/pause`, `/resume`, `/sync-now`, `/reverse`) require
-the X-Api-Token header to match the configured token file. Read-only routes
-are unauthenticated to make health monitoring trivial.
-
-The embedded dashboard is served at `/` (single HTML file from `static/`).
+Mutating routes (`/pause`, `/resume`, `/sync-now`, `/reverse`) require the
+X-Api-Token header. Read-only routes are unauthenticated.
 """
 from __future__ import annotations
 
@@ -16,17 +13,16 @@ from typing import Annotated, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 
-from .adapters import make_endpoint
+from .pipelines import postgres
 from .state import State
 
 logger = logging.getLogger(__name__)
-
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(state: State, scheduler) -> FastAPI:
-    app = FastAPI(title="netbox-active-passive-sync", version="0.1.0", docs_url="/api-docs")
+    app = FastAPI(title="netbox-active-passive-sync", version="0.2.0", docs_url="/api-docs")
 
     def require_token(x_api_token: Annotated[Optional[str], Header()] = None) -> None:
         expected = scheduler.cfg.control_api.token
@@ -60,23 +56,20 @@ def create_app(state: State, scheduler) -> FastAPI:
 
     @app.get("/version")
     async def get_version() -> dict:
-        from .cycle import read_version
         out: dict[str, str] = {}
-        for label, ep_cfg in (("source", scheduler.cfg.source), ("target", scheduler.cfg.target)):
+        for label, ep in (("source", scheduler.cfg.source), ("target", scheduler.cfg.target)):
             try:
-                out[label] = await read_version(make_endpoint(ep_cfg))
+                out[label] = await postgres.schema_fingerprint(ep)
             except Exception as e:
                 out[label] = f"<error: {e}>"
         return out
 
     @app.get("/cycles")
     async def get_cycles(limit: int = 20) -> list[dict]:
-        """Return the most recent N cycle log entries, newest first."""
         cycle_log = Path(scheduler.cfg.sync.cycle_log)
         if not cycle_log.exists():
             return []
         limit = max(1, min(limit, 500))
-        # Tail efficiently: read whole file (cycle log stays small in practice)
         lines = cycle_log.read_text(encoding="utf-8", errors="replace").splitlines()
         entries: list[dict] = []
         for line in lines[-limit:]:
@@ -115,12 +108,11 @@ def create_app(state: State, scheduler) -> FastAPI:
     async def reverse() -> dict:
         if state.in_flight:
             raise HTTPException(409, "cannot reverse while cycle is in flight")
-        # Pause first so no cycle starts mid-swap
         state.set_enabled(False)
         scheduler.cfg.reverse_on_disk()
         scheduler.reload_config()
         logger.info(
-            "direction reversed: new source=%s new target=%s; sync remains paused — call /resume after LB/DNS flip",
+            "direction reversed: new source=%s new target=%s; sync paused — /resume after cutover",
             scheduler.cfg.source.name, scheduler.cfg.target.name,
         )
         return {

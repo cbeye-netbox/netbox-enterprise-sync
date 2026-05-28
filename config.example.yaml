@@ -1,11 +1,8 @@
-# NetBox Active/Passive Sync — example config
+# NetBox Active/Passive Sync — example config.
 #
-# Three deployment topologies are supported. The differences are entirely in
-# the `transport` field on each endpoint:
-#
-#   Topology A (orchestrator on passive host):  source.transport=ssh, target.transport=local
-#   Topology B (orchestrator on active host):   source.transport=local, target.transport=ssh
-#   Topology C (orchestrator on a third host):  source.transport=ssh,  target.transport=ssh
+# This service runs as a single Docker container on a host that can reach
+# both Postgres servers over TCP. Nothing else is required — no SSH to NetBox
+# pods, no Kubernetes access, no shared volumes.
 #
 # To reverse direction after a failover, POST /reverse to the control API.
 # It will atomically swap the `source` and `target` blocks in this file.
@@ -18,43 +15,21 @@ sync:
 
 source:
   name: cluster-east
-  transport: ssh
-  ssh:
-    host: active.netbox.example.internal
-    user: netbox-sync
-    key_file: /run/secrets/source_ssh_key
-    port: 22
   postgres:
-    host: 127.0.0.1
+    host: active-pg.example.internal
     port: 5432
     user: netbox
     db: netbox
     password_file: /run/secrets/source_pg_password
-  redis:
-    host: 127.0.0.1
-    port: 6379
-  paths:
-    media: /opt/netbox/netbox/media
-  version_file: /opt/netbox/netbox/release.yaml
-  staging_dir: /tmp/netbox-sync
 
 target:
   name: cluster-west
-  transport: local
   postgres:
-    host: netbox-postgres        # docker network hostname on the passive cluster
+    host: passive-pg.example.internal
     port: 5432
     user: netbox
     db: netbox
     password_file: /run/secrets/target_pg_password
-  redis:
-    host: netbox-redis
-    port: 6379
-  paths:
-    media: /mnt/passive-media    # bind-mounted from the passive NetBox stack
-  version_file: /mnt/passive-netbox/release.yaml
-  quiesce_cmd: "docker compose -f /opt/netbox/docker-compose.yml stop netbox netbox-worker"
-  resume_cmd:  "docker compose -f /opt/netbox/docker-compose.yml start netbox netbox-worker"
 
 control_api:
   bind: 0.0.0.0:9911
